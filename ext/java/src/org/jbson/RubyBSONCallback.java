@@ -2,6 +2,7 @@
 // RubyBSONCallback.java
 package org.jbson;
 
+import org.jcodings.Encoding;
 import org.jruby.*;
 import org.jruby.util.ByteList;
 import org.jruby.RubyString;
@@ -19,6 +20,7 @@ import org.jruby.parser.ReOptions;
 import org.jruby.RubyArray;
 
 import java.io.*;
+import java.nio.charset.Charset;
 import java.util.*;
 import java.util.regex.*;
 
@@ -173,14 +175,14 @@ public class RubyBSONCallback implements BSONCallback {
     }
 
     public void gotCode( String name , String code ){
-        RubyString code_string = _runtime.newString( code );
+        RubyString code_string = newInternalRubyString(code);
         Object rb_code_obj = JavaEmbedUtils.invokeMethod(_runtime, _rbclsCode,
             "new", new Object[] { code_string }, Object.class);
         _put( name , (RubyObject)rb_code_obj );
     }
 
     public void gotCodeWScope( String name , String code , Object scope ){
-        RubyString code_string = _runtime.newString( code );
+        RubyString code_string = newInternalRubyString(code);
 
         Object rb_code_obj = JavaEmbedUtils.invokeMethod(_runtime, _rbclsCode,
             "new", new Object[] { code_string, (RubyHash)scope }, Object.class);
@@ -247,9 +249,23 @@ public class RubyBSONCallback implements BSONCallback {
     }
 
     public void gotString( String name , String v ){
-        RubyString str = RubyString.newString(_runtime, v);
+        RubyString str = newInternalRubyString(v);
         _put( name , str );
     }
+
+	private RubyString newInternalRubyString(String str) {
+		Encoding encoding = _runtime.getDefaultInternalEncoding();
+		if (encoding != null) {
+			Charset charset = encoding.getCharset();
+			if (charset == null)
+				charset = Charset.forName(new String(encoding.getName()));
+			RubyString result = RubyString.newStringNoCopy(_runtime, str.getBytes(charset));
+			result.setEncoding(encoding);
+			return result;
+		} else {
+			return RubyString.newString(_runtime, str);
+		}
+	}
 
     public void gotSymbol( String name , String v ){
         ByteList bytes = new ByteList(v.getBytes());

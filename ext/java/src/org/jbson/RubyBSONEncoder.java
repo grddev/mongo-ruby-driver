@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.*;
 import java.util.regex.*;
 import java.io.*;
 import org.jruby.util.Pack;
+import org.jruby.util.StringSupport;
 
 
 import java.math.BigInteger;
@@ -27,6 +28,7 @@ import org.jruby.runtime.builtin.IRubyObject;
 import org.jruby.parser.ReOptions;
 
 import org.jcodings.Encoding;
+import org.jcodings.specific.UTF8Encoding;
 
 import org.bson.BSONObject;
 import org.bson.io.*;
@@ -54,6 +56,7 @@ public class RubyBSONEncoder extends BSONEncoder {
     private RubyModule _rbclsInvalidDocument;
     private RubyModule _rbclsInvalidKeyName;
     private RubyModule _rbclsRangeError;
+    private RubyModule _rbclsInvalidStringEncoding;
     private RubySymbol _idAsSym;
     private RubyString _idAsString;
     private RubyString _tfAsString;
@@ -79,6 +82,7 @@ public class RubyBSONEncoder extends BSONEncoder {
       _rbclsInvalidDocument = _lookupConstant( _runtime, "BSON::InvalidDocument" );
       _rbclsInvalidKeyName  = _lookupConstant( _runtime, "BSON::InvalidKeyName" );
       _rbclsRangeError = _lookupConstant( _runtime, "RangeError" );
+      _rbclsInvalidStringEncoding = _lookupConstant( _runtime, "BSON::InvalidStringEncoding" );
       _idAsSym = _lookupSymbol( _runtime, "_id" );
       _tfAsString = _lookupString( _runtime, "_transientFields" );
 
@@ -192,17 +196,14 @@ public class RubyBSONEncoder extends BSONEncoder {
             RubyArray keys = (RubyArray)JavaEmbedUtils.invokeMethod( _runtime, o , "keys" , new Object[] {}
                 , Object.class);
 
-            for (Iterator<RubyObject> i = keys.iterator(); i.hasNext(); ) {
-
-                 Object hashKey = i.next();
+            // Do not use keys iterator, as that will convert to Java and original encoding will be lost
+            for (int i = 0; i < keys.getLength(); i++) {
+                 IRubyObject hashKey = keys.eltInternal(i);
 
                  // Convert the key into a Java String
                  String str = "";
-                 if( hashKey instanceof String) {
-                     str = hashKey.toString();
-                 }
-                 else if (hashKey instanceof RubyString) {
-                     str = ((RubyString)hashKey).asJavaString();
+                 if (hashKey instanceof RubyString) {
+                     str = utf8JavaString((RubyString)hashKey);
                  }
                  else if (hashKey instanceof RubySymbol) {
                      str = ((RubySymbol)hashKey).asJavaString();
@@ -228,6 +229,19 @@ public class RubyBSONEncoder extends BSONEncoder {
         _buf.writeInt( sizePos , _buf.getPosition() - sizePos );
         return _buf.getPosition() - start;
     }
+
+	private String utf8JavaString(RubyString rstr) {
+		enforceUTF8(rstr);
+		return new String(rstr.getBytes(), RubyEncoding.UTF8);
+	}
+
+	private void enforceUTF8(RubyString rstr) {
+		boolean validUTF8Sequence =
+			(StringSupport.codeRangeScan(UTF8Encoding.INSTANCE, rstr.getByteList()) == StringSupport.CR_BROKEN);
+		if (validUTF8Sequence) {
+			_rbRaise( (RubyClass)_rbclsInvalidStringEncoding, "String not valid UTF-8");
+		}
+	}
 
     protected void _putObjectField( String name , Object val ) {
         if( _check_keys )
@@ -610,6 +624,7 @@ public class RubyBSONEncoder extends BSONEncoder {
     }
 
     protected void putRubyString( String name , RubyString s ) {
+       enforceUTF8(s);
        byte[] bytes = s.getBytes();
        _put( STRING , name );
        _buf.writeInt( bytes.length + 1);
